@@ -72,27 +72,43 @@ def softmax(z, direction):
         return 0
 
 
-class layer():
-    def __init__(self, weights, bias, equation_input, activation_type):
-        self.weights = weights
-        self.bias = bias
-        self.weight_grad = np.zeros(weights.shape)
-        self.bias_grad = np.zeros(bias.shape)
+class dense_layer():
+    def __init__(self, input1, input2, equation_input, activation_type):
+        self.weights = np.random.randn(input2, input1) * np.sqrt(1. / input1)
+        self.bias = np.zeros((input2,1))
+        self.weight_grad = np.zeros(self.weights.shape)
+        self.bias_grad = np.zeros(self.bias.shape)
         self.equation_input = equation_input
         self.activation_result = 0
         if activation_type == "sigmoid":
             self.activation = sigmoid
-            self.activation_grad = sigmoid
+            self.equation_grad = sigmoid
         elif activation_type == "softmax":
             self.activation = softmax
-            self.activation_grad = softmax
-        self.equation_grad = 0
+            self.equation_grad = softmax
+        self.activation_grad = 0
         self.equation = np.matmul(self.weights, self.equation_input) + self.bias
+        
+    def set_equation_input(self, inputmatrix):
+        self.equation_input = inputmatrix
+        
+    def set_equation_grad(self, calculated):
+        if self.activation == sigmoid:
+            self.equation_grad = calculated * sigmoid(self.equation, "backward")
+        elif self.activation == softmax:
+            self.equation_grad = self.activation_result - calculated
+        
     def forward(self):
         self.equation = np.matmul(self.weights, self.equation_input) + self.bias
         self.activation_result = self.activation(self.equation, "forward")
+        return self.activation_result
         
-    def backward(self):
+    def backward(self, calculated):
+        
+        #equation gradient is based on activation grad * sigmoid for sigmoid
+        #for softmax it is activation_result - Y
+        self.set_equation_grad(calculated)
+        
         temp_weight_grad = ((1./m_training) * np.matmul(self.equation_grad, self.equation_input.T)) + ((lamda * self.weights) / m_training)
         self.weight_grad = (temp_weight_grad * (1. - momentum) + (self.weight_grad * momentum))
         self.weights = self.weights - learning_rate * self.weight_grad
@@ -101,27 +117,23 @@ class layer():
         self.bias_grad = (temp_bias_grad * (1. - momentum) + (self.bias_grad * momentum))
         self.bias = self.bias - learning_rate * self.bias_grad
 
-layer_one = layer(np.random.randn(n_h, n_x) * np.sqrt(1. / n_x),               # weight
-                  np.zeros((n_h, 1)),                                          # bias
-                  X,                                                           # equation_input (what the weights are multiplied by)
-                  "sigmoid")                                                   
 
-layer_two = layer(np.random.randn(digits, n_h) * np.sqrt(1. / n_h),            # weight
-                  np.zeros((digits, 1)),                                       # bias
-                  sigmoid(layer_one.equation, "forward"),                      # equation_input (what the weights are multiplied by)
-                  "softmax")
+
+# layer inputs 1&2 are used to determine the size of the weights and biases.
+# equation_input is what the weights are multiplied by
+layer_one = dense_layer(n_x, n_h, X, "sigmoid")
+layer_two = dense_layer(n_h, digits, sigmoid(layer_one.equation, "forward"), "softmax")
+
 
 for i in range(300):
-    layer_one.forward()                                         # layer 1 formula update
-    layer_two.equation_input = layer_one.activation_result      # layer 2 input update
-    layer_two.forward()                                         # layer 2 formula update
-    loss = cross_entropy_with_regularization(Y, layer_two.activation_result, layer_one.weights, layer_two.weights)
+    next_input = layer_one.forward()                                                 # layer 1 formula update
+    layer_two.set_equation_input(next_input)                                         # layer 2 input update
+    next_input = layer_two.forward()                                                 # layer 2 formula update
+    loss = cross_entropy_with_regularization(Y, next_input, layer_one.weights, layer_two.weights)
     
-    layer_two.equation_grad = layer_two.activation_result - Y   # cross-entropy & softmax gradient
-    layer_two.backward()                                        # layer 2 weights, bias update
+    layer_two.backward(Y)                                                                                         # layer 2 weights, bias update
     layer_one.activation_grad = np.matmul(layer_two.weights.T, layer_two.equation_grad)                           # layer 1 activation gradient
-    layer_one.equation_grad = layer_one.activation_grad * sigmoid(layer_one.equation, "backward")                 # layer 1 equation의 gradient
-    layer_one.backward()                                        # layer 1 weights, bias update
+    layer_one.backward(layer_one.activation_grad)                                                                 # layer 1 weights, bias update
     if (i % 10 == 0):
         print("Epoch", i, "loss: ", loss)
 
