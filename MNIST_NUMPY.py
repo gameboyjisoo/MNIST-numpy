@@ -74,10 +74,10 @@ def softmax(z, direction):
 
 class dense_layer():
     def __init__(self, input1, input2, equation_input, activation_type):
-        self.weights = np.random.randn(input2, input1) * np.sqrt(1. / input1)
-        self.bias = np.zeros((input2,1))
-        self.weight_grad = np.zeros(self.weights.shape)
-        self.bias_grad = np.zeros(self.bias.shape)
+        self._weights = np.random.randn(input2, input1) * np.sqrt(1. / input1)
+        self._bias = np.zeros((input2,1))
+        self.weight_grad = np.zeros(self._weights.shape)
+        self.bias_grad = np.zeros(self._bias.shape)
         self.equation_input = equation_input
         self.activation_result = 0
         if activation_type == "sigmoid":
@@ -87,37 +87,50 @@ class dense_layer():
             self.activation = softmax
             self.equation_grad = softmax
         self.activation_grad = 0
-        self.equation = np.matmul(self.weights, self.equation_input) + self.bias
+        self.equation = np.matmul(self._weights, self.equation_input) + self._bias
+    
+    def get_weights(self):
+        return self._weights
+    
+    def get_bias(self):
+        return self._bias
+        
+    def set_activation_grad(self, input1, input2):
+        if self.activation == sigmoid:
+            self.activation_grad = np.matmul(input1, input2)
         
     def set_equation_input(self, inputmatrix):
         self.equation_input = inputmatrix
         
-    def set_equation_grad(self, calculated):
+    def set_equation_grad(self):
         if self.activation == sigmoid:
-            self.equation_grad = calculated * sigmoid(self.equation, "backward")
+            self.equation_grad = self.activation_grad * sigmoid(self.equation, "backward")
         elif self.activation == softmax:
-            self.equation_grad = self.activation_result - calculated
-        
-    def forward(self):
-        self.equation = np.matmul(self.weights, self.equation_input) + self.bias
-        self.activation_result = self.activation(self.equation, "forward")
-        return self.activation_result
-        
-    def backward(self, calculated):
-        
-        #equation gradient is based on activation grad * sigmoid for sigmoid
-        #for softmax it is activation_result - Y
-        self.set_equation_grad(calculated)
-        
-        temp_weight_grad = ((1./m_training) * np.matmul(self.equation_grad, self.equation_input.T)) + ((lamda * self.weights) / m_training)
+            self.equation_grad = self.activation_result - Y
+    
+    def set_weight_grad(self):
+        temp_weight_grad = ((1./m_training) * np.matmul(self.equation_grad, self.equation_input.T)) + ((lamda * self._weights) / m_training)
         self.weight_grad = (temp_weight_grad * (1. - momentum) + (self.weight_grad * momentum))
-        self.weights = self.weights - learning_rate * self.weight_grad
-        
+        self._weights = self._weights - learning_rate * self.weight_grad
+    
+    def set_bias_grad(self):
         temp_bias_grad = (1./m_training) * np.sum(self.equation_grad, axis=1, keepdims=True)
         self.bias_grad = (temp_bias_grad * (1. - momentum) + (self.bias_grad * momentum))
-        self.bias = self.bias - learning_rate * self.bias_grad
-
-
+        self._bias = self._bias - learning_rate * self.bias_grad
+        
+    def forward(self):
+        self.equation = np.matmul(self._weights, self.equation_input) + self._bias
+        self.activation_result = self.activation(self.equation, "forward")
+        return self.activation_result
+    
+    def backward(self, input1, input2):
+        #equation gradient is based on activation grad * sigmoid for sigmoid
+        #for softmax it is activation_result - Y
+        self.set_activation_grad(input1, input2)
+        self.set_equation_grad()
+        self.set_weight_grad()
+        self.set_bias_grad()
+        return self._weights.T, self.equation_grad
 
 # layer inputs 1&2 are used to determine the size of the weights and biases.
 # equation_input is what the weights are multiplied by
@@ -125,26 +138,27 @@ layer_one = dense_layer(n_x, n_h, X, "sigmoid")
 layer_two = dense_layer(n_h, digits, sigmoid(layer_one.equation, "forward"), "softmax")
 
 
+print("Begin training")
+
 for i in range(300):
     next_input = layer_one.forward()                                                 # layer 1 formula update
     layer_two.set_equation_input(next_input)                                         # layer 2 input update
     next_input = layer_two.forward()                                                 # layer 2 formula update
-    loss = cross_entropy_with_regularization(Y, next_input, layer_one.weights, layer_two.weights)
+    loss = cross_entropy_with_regularization(Y, next_input, layer_one.get_weights(), layer_two.get_weights())
     
-    layer_two.backward(Y)                                                                                         # layer 2 weights, bias update
-    layer_one.activation_grad = np.matmul(layer_two.weights.T, layer_two.equation_grad)                           # layer 1 activation gradient
-    layer_one.backward(layer_one.activation_grad)                                                                 # layer 1 weights, bias update
+    next_input, next_input2 = layer_two.backward(0,0)                                # layer 2 update
+    layer_one.backward(next_input, next_input2)                                      # layer 1 update
     if (i % 10 == 0):
         print("Epoch", i, "loss: ", loss)
-
 
 print("Final loss:", loss)
 #1000 epoches took slightly less than 7 minutes!
 
-Z1 = np.matmul(layer_one.weights, X_test) + layer_one.bias #just a simple weight function
-A1 = sigmoid(Z1, "forward") #activation function
-Z2 = np.matmul(layer_two.weights, A1) + layer_two.bias #just a simple weight function
-A2 = np.exp(Z2) / np.sum(np.exp(Z2), axis=0) #softmax function
+
+Z1 = np.matmul(layer_one.get_weights(), X_test) + layer_one.get_bias()   #just a simple weight function
+A1 = sigmoid(Z1, "forward")                                              #activation function
+Z2 = np.matmul(layer_two.get_weights(), A1) + layer_two.get_bias()       #just a simple weight function
+A2 = softmax(Z2, "forward")                                              #softmax function
 
 
 predictions = np.argmax(A2, axis=0)
